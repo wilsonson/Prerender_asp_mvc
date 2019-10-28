@@ -1,5 +1,4 @@
-﻿using System;
-using System.Net;
+﻿using System.Net;
 
 namespace Prerender.io
 {
@@ -11,7 +10,7 @@ namespace Prerender.io
             get;
         }
 
-        public String ResponseBody
+        public string ResponseBody
         {
             private set;
             get;
@@ -19,11 +18,11 @@ namespace Prerender.io
 
         public WebHeaderCollection Headers
         {
-            private set; 
-            get; 
+            private set;
+            get;
         }
 
-        public ResponseResult(HttpStatusCode code, String body, WebHeaderCollection headers)
+        public ResponseResult(HttpStatusCode code, string body, WebHeaderCollection headers)
         {
             StatusCode = code;
             ResponseBody = body;

@@ -1,16 +1,15 @@
-﻿using System;
-using System.Configuration;
+﻿using System.Configuration;
 
 namespace Prerender.io
 {
     public class ProxyConfigElement : ConfigurationElement
     {
         [ConfigurationProperty("url")]
-        public String Url
+        public string Url
         {
             get
             {
-                return (String)this["url"];
+                return (string)this["url"];
             }
             set
             {

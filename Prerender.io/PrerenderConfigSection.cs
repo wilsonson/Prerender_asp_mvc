@@ -6,13 +6,20 @@ namespace Prerender.io
 {
     public sealed class PrerenderConfigSection : ConfigurationSection
     {
-        [ConfigurationProperty("prerenderServiceUrl", DefaultValue = "http://service.prerender.io/")]
-        public String PrerenderServiceUrl
+        private const string DefaultServiceUrl = "http://service.prerender.io/";
+        private object syncRoot = new object();
+        private List<string> crawlerUserAgentsList = null;
+        private List<string> whitelistSringList = null;
+        private List<string> blacklistSringList = null;
+        private List<string> extensionsToIgnoreStringList = null;
+
+        [ConfigurationProperty("prerenderServiceUrl", DefaultValue = DefaultServiceUrl)]
+        public string PrerenderServiceUrl
         {
             get
             {
-                var prerenderServiceUrl = (String)this["prerenderServiceUrl"];
-                return prerenderServiceUrl.IsNotBlank() ? prerenderServiceUrl : "http://service.prerender.io/";
+                var prerenderServiceUrl = (string)this["prerenderServiceUrl"];
+                return !string.IsNullOrWhiteSpace(prerenderServiceUrl) ? prerenderServiceUrl.Trim() : DefaultServiceUrl;
             }
             set
             {
@@ -20,25 +27,25 @@ namespace Prerender.io
             }
         }
 
-		[ConfigurationProperty("stripApplicationNameFromRequestUrl", DefaultValue = false)]
-		public bool StripApplicationNameFromRequestUrl
-		{
-			get
-			{
-				return (bool)this["stripApplicationNameFromRequestUrl"];
-			}
-			set
-			{
-				this["stripApplicationNameFromRequestUrl"] = value;
-			}
-		}
-
-        [ConfigurationProperty("whitelist")]
-        public String WhitelistString
+        [ConfigurationProperty("stripApplicationNameFromRequestUrl", DefaultValue = false)]
+        public bool StripApplicationNameFromRequestUrl
         {
             get
             {
-                return (String)this["whitelist"];
+                return (bool)this["stripApplicationNameFromRequestUrl"];
+            }
+            set
+            {
+                this["stripApplicationNameFromRequestUrl"] = value;
+            }
+        }
+
+        [ConfigurationProperty("whitelist")]
+        public string WhitelistString
+        {
+            get
+            {
+                return (string)this["whitelist"];
             }
             set
             {
@@ -46,20 +53,34 @@ namespace Prerender.io
             }
         }
 
-        public IEnumerable<String> Whitelist
+        public IEnumerable<string> Whitelist
         {
             get
             {
-                return WhitelistString.IsBlank() ? null : WhitelistString.Trim().Split(',');
+                if (whitelistSringList == null)
+                {
+                    lock (syncRoot)
+                    {
+                        if (whitelistSringList == null)
+                        {
+                            whitelistSringList = new List<string>();
+                            if (!string.IsNullOrWhiteSpace(WhitelistString))
+                            {
+                                whitelistSringList.AddRange(WhitelistString.Trim().Split(','));
+                            }
+                        }
+                    }
+                }
+                return whitelistSringList;
             }
         }
 
         [ConfigurationProperty("blacklist")]
-        public String BlacklistString
+        public string BlacklistString
         {
             get
             {
-                return (String)this["blacklist"];
+                return (string)this["blacklist"];
             }
             set
             {
@@ -71,16 +92,30 @@ namespace Prerender.io
         {
             get
             {
-                return BlacklistString.IsBlank() ? null : BlacklistString.Trim().Split(',');
+                if (blacklistSringList == null)
+                {
+                    lock (syncRoot)
+                    {
+                        if (blacklistSringList == null)
+                        {
+                            blacklistSringList = new List<string>();
+                            if (!string.IsNullOrWhiteSpace(BlacklistString))
+                            {
+                                blacklistSringList.AddRange(BlacklistString.Trim().Split(','));
+                            }
+                        }
+                    }
+                }
+                return blacklistSringList;
             }
         }
 
         [ConfigurationProperty("extensionsToIgnore")]
-        public String ExtensionsToIgnoreString
+        public string ExtensionsToIgnoreString
         {
             get
             {
-                return (String)this["extensionsToIgnore"];
+                return (string)this["extensionsToIgnore"];
             }
             set
             {
@@ -92,17 +127,31 @@ namespace Prerender.io
         {
             get
             {
-                return ExtensionsToIgnoreString.IsBlank() ? null : ExtensionsToIgnoreString.Trim().Split(',');
+                if (extensionsToIgnoreStringList == null)
+                {
+                    lock (syncRoot)
+                    {
+                        if (extensionsToIgnoreStringList == null)
+                        {
+                            extensionsToIgnoreStringList = new List<string>();
+                            if (!string.IsNullOrWhiteSpace(ExtensionsToIgnoreString))
+                            {
+                                extensionsToIgnoreStringList.AddRange(ExtensionsToIgnoreString.Trim().Split(','));
+                            }
+                        }
+                    }
+                }
+                return extensionsToIgnoreStringList;
             }
         }
 
 
         [ConfigurationProperty("crawlerUserAgents")]
-        public String CrawlerUserAgentsString
+        public string CrawlerUserAgentsString
         {
             get
             {
-                return (String)this["crawlerUserAgents"];
+                return (string)this["crawlerUserAgents"];
             }
             set
             {
@@ -110,11 +159,25 @@ namespace Prerender.io
             }
         }
 
-        public IEnumerable<String> CrawlerUserAgents
+        public IEnumerable<string> CrawlerUserAgents
         {
             get
             {
-                return CrawlerUserAgentsString.IsBlank() ? null : CrawlerUserAgentsString.Trim().Split(',');
+                if (crawlerUserAgentsList == null)
+                {
+                    lock (syncRoot)
+                    {
+                        if (crawlerUserAgentsList == null)
+                        {
+                            crawlerUserAgentsList = new List<string>();
+                            if (!string.IsNullOrWhiteSpace(CrawlerUserAgentsString))
+                            {
+                                crawlerUserAgentsList.AddRange(CrawlerUserAgentsString.Trim().Split(','));
+                            }
+                        }
+                    }
+                }
+                return crawlerUserAgentsList;
             }
         }
 
@@ -132,11 +195,11 @@ namespace Prerender.io
         }
 
         [ConfigurationProperty("token")]
-        public String Token
+        public string Token
         {
             get
             {
-                return (String)this["token"];
+                return (string)this["token"];
             }
             set
             {

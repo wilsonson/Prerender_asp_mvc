@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Web;
 
 namespace Prerender.io
@@ -17,6 +18,11 @@ namespace Prerender.io
         private HttpApplication _context;
         private static readonly string PRERENDER_SECTION_KEY = "prerender";
         private static readonly string _Escaped_Fragment = "_escaped_fragment_";
+        private List<string> CrawlerUsageAgents { get; set; }
+        private List<string> ExtensionsToIgnoreStrings { get; set; }
+        private List<Regex> WhiteList { get; set; }
+        private List<Regex> BlackList { get; set; }
+
 
         public void Dispose()
         {
@@ -27,15 +33,19 @@ namespace Prerender.io
         {
             this._context = context;
             _prerenderConfig = ConfigurationManager.GetSection(PRERENDER_SECTION_KEY) as PrerenderConfigSection;
-
-            context.BeginRequest += context_BeginRequest;
+            BuildCrawlerUsageAgentsList();
+            BuildExtensionsToIgnoreList();
+            BuildBlackList();
+            BuildWhiteList();
+            var wrapper = new EventHandlerTaskAsyncHelper(ContextBeginRequest);
+            context.AddOnBeginRequestAsync(wrapper.BeginEventHandler, wrapper.EndEventHandler);
         }
 
-        protected void context_BeginRequest(object sender, EventArgs e)
+        protected async Task ContextBeginRequest(object sender, EventArgs e)
         {
             try
             {
-                DoPrerender(_context);
+                await DoPrerenderAsync(_context);
             }
             catch (Exception exception)
             {
@@ -43,14 +53,14 @@ namespace Prerender.io
             }
         }
 
-        private void DoPrerender(HttpApplication context)
+        private async Task DoPrerenderAsync(HttpApplication context)
         {
             var httpContext = context.Context;
             var request = httpContext.Request;
             var response = httpContext.Response;
             if (ShouldShowPrerenderedPage(request))
             {
-                var result = GetPrerenderedPageResponse(request);
+                var result = await GetPrerenderedPageResponseAsync(request);
 
                 response.StatusCode = (int)result.StatusCode;
 
@@ -68,14 +78,15 @@ namespace Prerender.io
                         response.Headers.Add(header, value);
                     }
                 }
-      
+
                 response.Write(result.ResponseBody);
                 response.Flush();
                 context.CompleteRequest();
             }
         }
 
-        private ResponseResult GetPrerenderedPageResponse(HttpRequest request)
+
+        private async Task<ResponseResult> GetPrerenderedPageResponseAsync(HttpRequest request)
         {
             var apiUrl = GetApiUrl(request);
             var webRequest = (HttpWebRequest)WebRequest.Create(apiUrl);
@@ -86,29 +97,34 @@ namespace Prerender.io
             SetNoCache(webRequest);
 
             // Add our key!
-            if (_prerenderConfig.Token.IsNotBlank())
+            if (!string.IsNullOrWhiteSpace(_prerenderConfig.Token))
             {
                 webRequest.Headers.Add("X-Prerender-Token", _prerenderConfig.Token);
             }
 
+
             try
             {
                 // Get the web response and read content etc. if successful
-                var webResponse = (HttpWebResponse) webRequest.GetResponse();
-                var reader = new StreamReader(webResponse.GetResponseStream(), Encoding.UTF8);
-                return new ResponseResult(webResponse.StatusCode, reader.ReadToEnd(), webResponse.Headers);
+                using (var webResponse = (HttpWebResponse)await webRequest.GetResponseAsync())
+                {
+                    using (var reader = new StreamReader(webResponse.GetResponseStream(), Encoding.UTF8))
+                    {
+                        return new ResponseResult(webResponse.StatusCode, await reader.ReadToEndAsync(), webResponse.Headers);
+                    }
+                }
             }
             catch (WebException e)
             {
                 // Handle response WebExceptions for invalid renders (404s, 504s etc.) - but we still want the content
                 var reader = new StreamReader(e.Response.GetResponseStream(), Encoding.UTF8);
-                return new ResponseResult(((HttpWebResponse)e.Response).StatusCode, reader.ReadToEnd(), e.Response.Headers);
+                return new ResponseResult(((HttpWebResponse)e.Response).StatusCode, await reader.ReadToEndAsync(), e.Response.Headers);
             }
         }
 
         private void SetProxy(HttpWebRequest webRequest)
         {
-            if (_prerenderConfig.Proxy != null && _prerenderConfig.Proxy.Url.IsNotBlank())
+            if (_prerenderConfig.Proxy != null && !string.IsNullOrWhiteSpace(_prerenderConfig.Proxy.Url))
             {
                 webRequest.Proxy = new WebProxy(_prerenderConfig.Proxy.Url, _prerenderConfig.Proxy.Port);
             }
@@ -139,19 +155,19 @@ namespace Prerender.io
             }
 
             // Remove the application from the URL
-			if (_prerenderConfig.StripApplicationNameFromRequestUrl && !string.IsNullOrEmpty(request.ApplicationPath) && request.ApplicationPath != "/")
-			{
-				// http://test.com/MyApp/?_escape_=/somewhere
-				url = url.Replace(request.ApplicationPath, string.Empty);
-			}
- 
+            if (_prerenderConfig.StripApplicationNameFromRequestUrl && !string.IsNullOrEmpty(request.ApplicationPath) && request.ApplicationPath != "/")
+            {
+                // http://test.com/MyApp/?_escape_=/somewhere
+                url = url.Replace(request.ApplicationPath, string.Empty);
+            }
+
             var prerenderServiceUrl = _prerenderConfig.PrerenderServiceUrl;
             return prerenderServiceUrl.EndsWith("/")
                 ? (prerenderServiceUrl + url)
                 : string.Format("{0}/{1}", prerenderServiceUrl, url);
         }
-	
-	public static string RemoveQueryStringByKey(string url, string key)
+
+        public static string RemoveQueryStringByKey(string url, string key)
         {
             var uri = new Uri(url);
 
@@ -176,18 +192,12 @@ namespace Prerender.io
             var url = request.Url;
             var referer = request.UrlReferrer == null ? string.Empty : request.UrlReferrer.AbsoluteUri;
 
-            var blacklist = _prerenderConfig.Blacklist;
-            if (blacklist != null && IsInBlackList(url, referer, blacklist))
-
-
-
-
+            if (IsInBlackList(url, referer))
             {
                 return false;
             }
 
-            var whiteList = _prerenderConfig.Whitelist;
-            if (whiteList != null && !IsInWhiteList(url, whiteList))
+            if (IsInWhiteList(url))
             {
                 return false;
             }
@@ -196,7 +206,7 @@ namespace Prerender.io
             {
                 return true;
             }
-            if (userAgent.IsBlank())
+            if (string.IsNullOrWhiteSpace(userAgent))
             {
                 return false;
             }
@@ -213,42 +223,26 @@ namespace Prerender.io
 
         }
 
-        private bool IsInBlackList(Uri url, string referer, IEnumerable<string> blacklist)
+        private bool IsInBlackList(Uri url, string referer)
         {
-            return blacklist.Any(item =>
-            {
-                var regex = new Regex(item);
-                return regex.IsMatch(url.AbsoluteUri) || (referer.IsNotBlank() && regex.IsMatch(referer));
-            });
+            return this.BlackList.Any(n => n.IsMatch(url.AbsoluteUri) || (!string.IsNullOrWhiteSpace(referer) && n.IsMatch(referer)));
         }
 
-        private bool IsInWhiteList(Uri url, IEnumerable<string> whiteList)
+        private bool IsInWhiteList(Uri url)
         {
-            return whiteList.Any(item => new Regex(item).IsMatch(url.AbsoluteUri));
+            return this.WhiteList.Any(n => n.IsMatch(url.AbsoluteUri));
         }
 
         private bool IsInResources(Uri url)
         {
-            var extensionsToIgnore = GetExtensionsToIgnore();
+            var extensionsToIgnore = this.ExtensionsToIgnoreStrings;
             return extensionsToIgnore.Any(item => url.AbsoluteUri.ToLower().Contains(item.ToLower()));
-        }
-
-        private IEnumerable<String> GetExtensionsToIgnore()
-        {
-            var extensionsToIgnore = new List<string>(new[]{".js", ".css", ".less", ".png", ".jpg", ".jpeg",
-                ".gif", ".pdf", ".doc", ".txt", ".zip", ".mp3", ".rar", ".exe", ".wmv", ".doc", ".avi", ".ppt", ".mpg",
-                ".mpeg", ".tif", ".wav", ".mov", ".psd", ".ai", ".xls", ".mp4", ".m4a", ".swf", ".dat", ".dmg",
-                ".iso", ".flv", ".m4v", ".torrent"});
-            if (_prerenderConfig.ExtensionsToIgnore.IsNotEmpty())
-            {
-                extensionsToIgnore.AddRange(_prerenderConfig.ExtensionsToIgnore);
-            }
-            return extensionsToIgnore;
         }
 
         private bool IsInSearchUserAgent(string useAgent)
         {
-            var crawlerUserAgents = GetCrawlerUserAgents();
+            //var crawlerUserAgents = GetCrawlerUserAgents();
+            var crawlerUserAgents = this.CrawlerUsageAgents;
 
             // We need to see if the user agent actually contains any of the partial user agents we have!
             // THE ORIGINAL version compared for an exact match...!
@@ -258,28 +252,39 @@ namespace Prerender.io
                     useAgent.IndexOf(crawlerUserAgent, StringComparison.InvariantCultureIgnoreCase) >= 0));
         }
 
-        private IEnumerable<String> GetCrawlerUserAgents()
-        {
-            var crawlerUserAgents = new List<string>(new[]
-                {
-                    "googlebot", "yahoo", "bingbot", "yandex", "baiduspider", "facebookexternalhit", "twitterbot", "rogerbot", "linkedinbot", 
-                    "embedly", "quora link preview", "showyoubot", "outbrain", "pinterest/0.", 
-                    "developers.google.com/+/web/snippet", "slackbot", "vkShare", "W3C_Validator", 
-                    "redditbot", "Applebot", "WhatsApp", "flipboard", "tumblr", "bitlybot", 
-                    "SkypeUriPreview", "nuzzel", "Discordbot", "Google Page Speed", "x-bufferbot"
-                });
-
-            if (_prerenderConfig.CrawlerUserAgents.IsNotEmpty())
-            {
-                crawlerUserAgents.AddRange(_prerenderConfig.CrawlerUserAgents);
-            }
-            return crawlerUserAgents;
-        }
-
         private bool HasEscapedFragment(HttpRequest request)
         {
             return request.QueryString.AllKeys.Contains(_Escaped_Fragment);
         }
 
+        private void BuildBlackList()
+        {
+            var blackList = new List<Regex>();
+            blackList.AddRange(_prerenderConfig.Blacklist.Select(n => new Regex(n)));
+            this.BlackList = blackList;
+        }
+
+        private void BuildWhiteList()
+        {
+            var whiteList = new List<Regex>();
+            whiteList.AddRange(_prerenderConfig.Whitelist.Select(n => new Regex(n)));
+            this.WhiteList = whiteList;
+        }
+
+        private void BuildExtensionsToIgnoreList()
+        {
+            var extensionsToIgnore = new List<string>();
+            extensionsToIgnore.AddRange(PredefinedValues.ExtensionsToIgnore);
+            extensionsToIgnore.AddRange(_prerenderConfig.ExtensionsToIgnore);
+            this.ExtensionsToIgnoreStrings = extensionsToIgnore.Select(n => n.ToLower()).Distinct().ToList();
+        }
+
+        private void BuildCrawlerUsageAgentsList()
+        {
+            var userAgents = new List<string>();
+            userAgents.AddRange(PredefinedValues.CrawlerUserAgents);
+            userAgents.AddRange(_prerenderConfig.CrawlerUserAgents);
+            this.CrawlerUsageAgents = userAgents.Select(n => n.ToLower()).Distinct().ToList();
+        }
     }
 }
