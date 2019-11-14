@@ -192,14 +192,15 @@ namespace Prerender.io
             var url = request.Url;
             var referer = request.UrlReferrer == null ? string.Empty : request.UrlReferrer.AbsoluteUri;
 
+            // If URL or referrer hit the balck list, it's never prerender.
             if (IsInBlackList(url, referer))
             {
                 return false;
             }
-
+            // If URL or referrer hit the white list, it must prerender.
             if (IsInWhiteList(url))
             {
-                return false;
+                return true;
             }
 
             if (HasEscapedFragment(request))
